@@ -1,0 +1,45 @@
+{
+  "name": "codex-autopsy",
+  "version": "0.0.0",
+  "description": "What killed my context window? A per-category breakdown of a Codex session's context.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "codex-autopsy": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@12.11.2",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agoda-com/codex-autopsy"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "changeset": "changeset"
+  },
+  "dependencies": {
+    "gpt-tokenizer": "^4.0.0"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3",
+    "@types/node": "^24",
+    "prettier": "^3.9.10",
+    "tsdown": "^0.23.1",
+    "typescript": "^7.0.2",
+    "unrun": "^0.3.1",
+    "vitest": "^5.0.3"
+  }
+}
