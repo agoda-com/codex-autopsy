@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { styleText } from 'node:util'
 
-import type { Breakdown } from './breakdown.js'
+import type { Breakdown, CategoryKey } from './breakdown.js'
 import type { SessionSummary } from './rollout.js'
 
 export function renderBanner(): string {
@@ -18,8 +18,40 @@ export function renderBreakdown(b: Breakdown): string {
   return breakdownFormat(b, Boolean(process.stdout.isTTY))
 }
 
-export function renderTop(_b: Breakdown, _n: number): string {
-  return ''
+const LARGE_ITEM_TOKENS = 5000
+
+function categoryLabel(b: Breakdown, key: CategoryKey): string {
+  return b.categories.find((cat) => cat.key === key)?.label ?? key
+}
+
+export function renderTop(b: Breakdown, n: number): string {
+  const count = Math.max(0, Math.min(n, b.items.length))
+  const items = b.items.slice(0, count)
+  const lines: string[] = []
+  let hasLarge = false
+
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]
+    const rank = String(index + 1).padStart(2, ' ')
+    const tokens = formatTokens(item.tokens).padStart(6, ' ')
+    const label = categoryLabel(b, item.category).padEnd(22, ' ')
+    const marker = item.tokens > LARGE_ITEM_TOKENS ? ' ⚠' : ''
+    if (item.tokens > LARGE_ITEM_TOKENS) {
+      hasLarge = true
+    }
+    lines.push(
+      `${rank}  ${tokens}  ${label}  ${item.child}  ${item.preview}${marker}`,
+    )
+  }
+
+  if (hasLarge) {
+    lines.push('')
+    lines.push(
+      '⚠ Items over 5,000 tokens are unusually large and may dominate the context window.',
+    )
+  }
+
+  return lines.join('\n')
 }
 
 function formatDelta(delta: number): string {

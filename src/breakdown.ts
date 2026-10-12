@@ -179,6 +179,54 @@ function nextTokenCountReasoning(
   return 0
 }
 
+function previewFromMessageText(text: string): string {
+  const trimmed = text.trimStart()
+  const tag = leadingTag(trimmed)
+  if (tag) {
+    return `<${tag}>`
+  }
+  const firstLine = trimmed.split('\n')[0] ?? ''
+  return firstLine
+}
+
+function execCommandFromInput(input: unknown): string {
+  if (typeof input !== 'string') {
+    return stringField(input).replace(/\s+/g, ' ').trim()
+  }
+  const trimmed = input.trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>
+      const cmd = parsed.cmd ?? parsed.command
+      if (typeof cmd === 'string') {
+        return cmd.replace(/\s+/g, ' ').trim()
+      }
+    } catch {
+      // not JSON
+    }
+  }
+  return trimmed.replace(/\s+/g, ' ').trim()
+}
+
+function functionCallPreview(name: string, argumentsValue: unknown): string {
+  const args = stringField(argumentsValue).replace(/\s+/g, ' ').trim()
+  return `${name}(${args})`
+}
+
+function firstLineOfOutput(output: unknown): string {
+  const text = stringField(output)
+  const line = text.split('\n')[0] ?? ''
+  return line.replace(/\s+/g, ' ').trim()
+}
+
+function collapsePreview(text: string): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  if (oneLine.length <= 80) {
+    return oneLine
+  }
+  return oneLine.slice(0, 77) + '…'
+}
+
 export function previewOf(record: RolloutRecord): string {
   let text = ''
   if (record.type === 'session_meta') {
@@ -189,7 +237,7 @@ export function previewOf(record: RolloutRecord): string {
       'text' in base &&
       typeof base.text === 'string'
     ) {
-      text = base.text
+      text = previewFromMessageText(base.text)
     }
   } else if (record.type === 'world_state') {
     const state = record.payload.state
@@ -202,32 +250,37 @@ export function previewOf(record: RolloutRecord): string {
       'text' in state.agents_md &&
       typeof state.agents_md.text === 'string'
     ) {
-      text = state.agents_md.text
+      text = previewFromMessageText(state.agents_md.text)
     }
   } else if (record.type === 'response_item') {
     const itemType = record.payload.type
     if (itemType === 'message') {
-      text = messageText(record.payload)
+      text = previewFromMessageText(messageText(record.payload))
     } else if (itemType === 'custom_tool_call') {
-      text = stringField(record.payload.input)
+      const name =
+        typeof record.payload.name === 'string' ? record.payload.name : 'tool'
+      text =
+        name === 'exec'
+          ? execCommandFromInput(record.payload.input)
+          : stringField(record.payload.input)
     } else if (itemType === 'function_call') {
-      text = stringField(record.payload.arguments)
+      const name =
+        typeof record.payload.name === 'string'
+          ? record.payload.name
+          : 'function'
+      text = functionCallPreview(name, record.payload.arguments)
     } else if (
       itemType === 'custom_tool_call_output' ||
       itemType === 'function_call_output'
     ) {
-      text = stringField(record.payload.output)
+      text = firstLineOfOutput(record.payload.output)
     } else if (itemType === 'reasoning') {
       text = '(encrypted reasoning)'
     } else {
       text = stringField(record.payload.input ?? record.payload.arguments)
     }
   }
-  const oneLine = text.replace(/\s+/g, ' ').trim()
-  if (oneLine.length <= 80) {
-    return oneLine
-  }
-  return oneLine.slice(0, 77) + '...'
+  return collapsePreview(text)
 }
 
 export function readItems(records: RolloutRecord[]): Item[] {
