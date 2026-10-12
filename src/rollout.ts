@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import type { RolloutRecord } from './breakdown.js'
 
@@ -127,9 +127,34 @@ export function resolveSession(home: string, arg: string): string {
       return arg
     }
   } catch {
-    // fall through
+    // not a filesystem path
   }
-  throw new Error('resolveSession by id prefix: not implemented')
+  const matches = sessionsMatchingPrefix(home, arg)
+  if (matches.length === 0) {
+    throw new Error(`No session matching "${arg}" in ${join(home, 'sessions')}`)
+  }
+  if (matches.length === 1) {
+    return matches[0].path
+  }
+  const lines = matches.map((m) => `  ${m.id}  ${m.started}`)
+  throw new Error(`Multiple sessions match "${arg}":\n${lines.join('\n')}`)
+}
+
+function idFromRolloutFilename(path: string): string {
+  const name = basename(path)
+  const match =
+    /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/.exec(name)
+  return match ? match[1] : ''
+}
+
+function sessionsMatchingPrefix(
+  home: string,
+  prefix: string,
+): SessionSummary[] {
+  const sessions = listSessions(home)
+  return sessions.filter((s) =>
+    idFromRolloutFilename(s.path).startsWith(prefix),
+  )
 }
 
 export type SessionSummary = {
@@ -141,6 +166,100 @@ export type SessionSummary = {
   windowMax: number
 }
 
-export function listSessions(_home: string): SessionSummary[] {
-  return []
+export function listSessions(home: string): SessionSummary[] {
+  const candidates = rolloutCandidates(home)
+  candidates.sort((a, b) => {
+    const ka = rolloutSortKey(a)
+    const kb = rolloutSortKey(b)
+    if (ka.date !== kb.date) {
+      return ka.date < kb.date ? 1 : -1
+    }
+    return kb.mtime - ka.mtime
+  })
+  return candidates.map((path) => summarizeRolloutPath(path))
+}
+
+function summarizeRolloutPath(path: string): SessionSummary {
+  const fallbackId = idFromRolloutFilename(path)
+  let id = fallbackId
+  let started = ''
+  let cwd = ''
+  let firstPrompt = ''
+  let windowMax = 0
+
+  const raw = readFileSync(path, 'utf8')
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.trim() === '') {
+      continue
+    }
+    let parsed: {
+      type?: string
+      payload?: Record<string, unknown>
+    }
+    try {
+      parsed = JSON.parse(line) as {
+        type?: string
+        payload?: Record<string, unknown>
+      }
+    } catch {
+      continue
+    }
+    if (typeof parsed.type !== 'string' || !parsed.payload) {
+      continue
+    }
+    if (parsed.type === 'session_meta') {
+      const payload = parsed.payload
+      if (typeof payload.id === 'string') {
+        id = payload.id
+      }
+      if (typeof payload.timestamp === 'string') {
+        started = payload.timestamp
+      }
+      if (typeof payload.cwd === 'string') {
+        cwd = payload.cwd
+      }
+    }
+    if (firstPrompt === '' && parsed.type === 'response_item') {
+      const payload = parsed.payload
+      if (payload.type === 'message' && payload.role === 'user') {
+        const text = userMessageText(payload)
+        if (text !== undefined) {
+          const firstLine = text.split('\n')[0] ?? ''
+          if (!firstLine.startsWith('<')) {
+            firstPrompt =
+              firstLine.length > 60 ? firstLine.slice(0, 60) : firstLine
+          }
+        }
+      }
+    }
+    if (parsed.type === 'event_msg' && parsed.payload.type === 'token_count') {
+      const info = parsed.payload.info
+      if (info && typeof info === 'object') {
+        const modelWindow = (info as { model_context_window?: unknown })
+          .model_context_window
+        if (typeof modelWindow === 'number') {
+          windowMax = modelWindow
+        }
+      }
+    }
+  }
+
+  return { id, path, started, cwd, firstPrompt, windowMax }
+}
+
+function userMessageText(payload: Record<string, unknown>): string | undefined {
+  const content = payload.content
+  if (!Array.isArray(content)) {
+    return undefined
+  }
+  for (const part of content) {
+    if (!part || typeof part !== 'object') {
+      continue
+    }
+    const block = part as { type?: unknown; text?: unknown }
+    if (block.type === 'input_text' && typeof block.text === 'string') {
+      return block.text
+    }
+  }
+  return undefined
 }

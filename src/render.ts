@@ -26,8 +26,27 @@ export function renderTurns(_b: Breakdown): string {
   return ''
 }
 
-export function renderList(_sessions: SessionSummary[]): string {
-  return ''
+export function renderList(sessions: SessionSummary[]): string {
+  if (sessions.length === 0) {
+    return (
+      'No rollouts found under CODEX_HOME/sessions. ' +
+      'Codex deletes old rollouts over time; only sessions still on disk can be listed.\n'
+    )
+  }
+  const home = homedir()
+  const homePrefix = home.endsWith('/') ? home : `${home}/`
+  const rows = sessions.map((session) => {
+    let cwd = session.cwd
+    if (cwd.startsWith(homePrefix)) {
+      cwd = `~/${cwd.slice(homePrefix.length)}`
+    } else if (cwd === home) {
+      cwd = '~'
+    }
+    const idShort = session.id.slice(0, 8)
+    const window = formatTokens(session.windowMax)
+    return `${session.started}  ${idShort}  ${window}  ${cwd}  ${session.firstPrompt}`
+  })
+  return `${rows.join('\n')}\n`
 }
 
 export function formatTokens(n: number): string {
