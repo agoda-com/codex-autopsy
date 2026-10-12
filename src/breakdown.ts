@@ -449,7 +449,72 @@ export function collectTurns(_records: RolloutRecord[]): Turn[] {
 }
 
 export function afterLastCompaction(records: RolloutRecord[]): RolloutRecord[] {
-  return records
+  let lastCompactedIndex = -1
+  for (let i = records.length - 1; i >= 0; i--) {
+    if (records[i].type === 'compacted') {
+      lastCompactedIndex = i
+      break
+    }
+  }
+  if (lastCompactedIndex === -1) {
+    return records
+  }
+
+  const compactedRecord = records[lastCompactedIndex]
+  const replacement = replacementHistoryRecords(compactedRecord)
+  const result: RolloutRecord[] = []
+
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]
+    if (record.type === 'response_item' && i <= lastCompactedIndex) {
+      continue
+    }
+    result.push(record)
+    if (i === lastCompactedIndex) {
+      result.push(...replacement)
+    }
+  }
+
+  return result
+}
+
+function replacementHistoryRecords(
+  compactedRecord: RolloutRecord,
+): RolloutRecord[] {
+  const payload = compactedRecord.payload
+  const replacement = payload.replacement_history
+  if (Array.isArray(replacement)) {
+    const items: RolloutRecord[] = []
+    for (const item of replacement) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        continue
+      }
+      items.push({
+        line: compactedRecord.line,
+        timestamp: compactedRecord.timestamp,
+        type: 'response_item',
+        payload: item as Record<string, unknown>,
+      })
+    }
+    return items
+  }
+
+  const message = payload.message
+  if (typeof message !== 'string') {
+    return []
+  }
+  return [
+    {
+      line: compactedRecord.line,
+      timestamp: compactedRecord.timestamp,
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: message }],
+      },
+    },
+  ]
 }
 
 function lastWindow(records: RolloutRecord[]): { used: number; max: number } {
