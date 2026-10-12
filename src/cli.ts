@@ -115,14 +115,18 @@ export function main(
   const chunks: string[] = []
   if (parsed.values.top !== undefined) {
     const n = Number(parsed.values.top)
-    chunks.push(renderTop(breakdown, Number.isFinite(n) ? n : 10))
+    if (!Number.isInteger(n) || n < 1) {
+      io.stderr.write(
+        `--top expects a positive whole number, got "${parsed.values.top}"\n`,
+      )
+      return 1
+    }
+    chunks.push(renderTop(breakdown, n))
   }
   if (parsed.values.turns) {
     chunks.push(renderTurns(breakdown))
   }
   if (parsed.values.top === undefined && !parsed.values.turns) {
-    chunks.push(renderBreakdown(breakdown))
-  } else {
     chunks.push(renderBreakdown(breakdown))
   }
 
