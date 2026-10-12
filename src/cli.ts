@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs'
+import { WriteStream } from 'node:tty'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -25,6 +26,15 @@ export type MainIo = {
   stdout: NodeJS.WritableStream
   stderr: NodeJS.WritableStream
   isTTY: boolean
+  colorDepth?: number
+}
+
+function terminalColorDepth(env: NodeJS.ProcessEnv, isTTY: boolean): number {
+  if (!isTTY && !env.FORCE_COLOR) {
+    return 1
+  }
+  const depth = WriteStream.prototype.getColorDepth(env)
+  return depth === 8 && env.WT_SESSION && !env.NO_COLOR ? 24 : depth
 }
 
 export function main(
@@ -52,7 +62,7 @@ export function main(
 
   if (parsed.values.help) {
     io.stderr.write(
-      `Usage: codex-autopsy [session] [--list] [--top N] [--turns] [--json]\n`,
+      `Usage: codex-autopsy [session] [--list] [--top N] [--turns] [--json] [--no-banner]\nColour follows the terminal; set NO_COLOR to turn it off or FORCE_COLOR=3 to force 24-bit colour.\n`,
     )
     return 0
   }
@@ -101,9 +111,10 @@ export function main(
     return 0
   }
 
+  const depth = io.colorDepth ?? terminalColorDepth(env, io.isTTY)
   const noBanner = parsed.values['no-banner'] ?? false
   if (io.isTTY && !noBanner) {
-    const banner = renderBanner()
+    const banner = renderBanner(depth)
     if (banner) {
       io.stdout.write(banner)
       if (!banner.endsWith('\n')) {
@@ -121,13 +132,13 @@ export function main(
       )
       return 1
     }
-    chunks.push(renderTop(breakdown, n))
+    chunks.push(renderTop(breakdown, n, depth))
   }
   if (parsed.values.turns) {
-    chunks.push(renderTurns(breakdown))
+    chunks.push(renderTurns(breakdown, depth))
   }
   if (parsed.values.top === undefined && !parsed.values.turns) {
-    chunks.push(renderBreakdown(breakdown))
+    chunks.push(renderBreakdown(breakdown, depth))
   }
 
   const body = chunks.filter((chunk) => chunk.length > 0).join('\n')

@@ -1,80 +1,219 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { styleText } from 'node:util'
 
 import type { Breakdown, CategoryKey } from './breakdown.js'
 import type { SessionSummary } from './rollout.js'
 
-export function renderBanner(): string {
+// Agoda brand palette: the five logo colours plus the call-to-action blue, with tints
+// for categories beyond six. Depth is 1 (no colour), 4, 8 or 24 bits, as reported by
+// tty.WriteStream#getColorDepth.
+const BRAND = {
+  red: '#FF2938',
+  yellow: '#FDB812',
+  green: '#00B057',
+  purple: '#AF38B1',
+  blue: '#00AAE0',
+  cta: '#478CF7',
+  redTint: '#FF7A84',
+  purpleTint: '#D98BDA',
+  grey: '#B8B8B8',
+  dim: '#5C5C5C',
+}
+
+const CATEGORY_COLOUR: Record<CategoryKey | 'unattributed' | 'free', string> = {
+  system: BRAND.blue,
+  developer: BRAND.cta,
+  agents_md: BRAND.green,
+  environment: BRAND.purple,
+  conversation: BRAND.yellow,
+  tool_calls: BRAND.redTint,
+  tool_output: BRAND.red,
+  reasoning: BRAND.purpleTint,
+  unattributed: BRAND.grey,
+  free: BRAND.dim,
+}
+
+const USED_CELL = '⛁'
+const FREE_CELL = '⛶'
+
+export function paint(
+  text: string,
+  hex: string,
+  depth: number,
+  bold = false,
+): string {
+  if (depth < 4 || text.length === 0) {
+    return text
+  }
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  const colour =
+    depth >= 24
+      ? `38;2;${r};${g};${b}`
+      : depth >= 8
+        ? `38;5;${paintXterm256(r, g, b)}`
+        : paintBasic(r, g, b)
+  return `\x1b[${bold ? '1;' : ''}${colour}m${text}\x1b[0m`
+}
+
+function paintXterm256(r: number, g: number, b: number): number {
+  const level = (v: number) =>
+    v < 48 ? 0 : v < 115 ? 1 : Math.floor((v - 35) / 40)
+  return 16 + 36 * level(r) + 6 * level(g) + level(b)
+}
+
+function paintBasic(r: number, g: number, b: number): string {
+  const max = Math.max(r, g, b)
+  if (max - Math.min(r, g, b) < 40) {
+    return max > 150 ? '37' : '90'
+  }
+  const bit = (v: number) => (v >= max * 0.6 ? 1 : 0)
+  return String(90 + bit(r) + 2 * bit(g) + 4 * bit(b))
+}
+
+function dim(text: string, depth: number): string {
+  return depth < 4 ? text : `\x1b[2m${text}\x1b[0m`
+}
+
+function bold(text: string, depth: number): string {
+  return depth < 4 ? text : `\x1b[1m${text}\x1b[0m`
+}
+
+export function renderBanner(depth = 1): string {
+  const dots = [BRAND.red, BRAND.yellow, BRAND.green, BRAND.purple, BRAND.blue]
+    .map((hex) => paint('●', hex, depth))
+    .join(' ')
   return [
-    '      ___',
-    '     /   \\',
-    '    | o o |   CODEX AUTOPSY',
-    '     \\___/',
-    ' What killed my context window?',
+    paint('      ___', BRAND.grey, depth),
+    paint('     /   \\', BRAND.grey, depth),
+    `${paint('    | x x |', BRAND.grey, depth)}   ${paint('CODEX AUTOPSY', BRAND.red, depth, true)}`,
+    `${paint('     \\_^_/', BRAND.grey, depth)}    ${dots}`,
+    ` ${paint('What killed my context window?', BRAND.yellow, depth)}`,
   ].join('\n')
 }
 
-export function renderBreakdown(b: Breakdown): string {
-  return breakdownFormat(b, Boolean(process.stdout.isTTY))
+export function renderBreakdown(b: Breakdown, depth = 1): string {
+  const grid = breakdownGrid(b, depth)
+  const legend = breakdownLegend(b, depth)
+  const rows = Math.max(grid.length, legend.length)
+  const gridWidth = BREAKDOWN_GRID_COLUMNS * 2 - 1
+  const lines: string[] = []
+  for (let i = 0; i < rows; i++) {
+    const left = grid[i] ?? ' '.repeat(gridWidth)
+    lines.push(`  ${left}   ${legend[i] ?? ''}`.trimEnd())
+  }
+  return lines.join('\n')
 }
 
 const LARGE_ITEM_TOKENS = 5000
+const TOP_BAR_WIDTH = 12
 
 function categoryLabel(b: Breakdown, key: CategoryKey): string {
   return b.categories.find((cat) => cat.key === key)?.label ?? key
 }
 
-export function renderTop(b: Breakdown, n: number): string {
+export function renderTop(b: Breakdown, n: number, depth = 1): string {
   const count = Math.max(0, Math.min(n, b.items.length))
   const items = b.items.slice(0, count)
+  const largest = items[0]?.tokens ?? 0
+  const childWidth = Math.max(0, ...items.map((item) => item.child.length))
   const lines: string[] = []
   let hasLarge = false
 
   for (let index = 0; index < items.length; index++) {
     const item = items[index]
-    const rank = String(index + 1).padStart(2, ' ')
-    const tokens = formatTokens(item.tokens).padStart(6, ' ')
-    const label = categoryLabel(b, item.category).padEnd(22, ' ')
-    const marker = item.tokens > LARGE_ITEM_TOKENS ? ' ⚠' : ''
-    if (item.tokens > LARGE_ITEM_TOKENS) {
+    const colour = CATEGORY_COLOUR[item.category]
+    const rank = dim(String(index + 1).padStart(2, ' '), depth)
+    const tokens = bold(formatTokens(item.tokens).padStart(6, ' '), depth)
+    const filled =
+      largest > 0
+        ? Math.max(1, Math.round((TOP_BAR_WIDTH * item.tokens) / largest))
+        : 0
+    const bar =
+      paint('█'.repeat(filled), colour, depth) +
+      dim('·'.repeat(TOP_BAR_WIDTH - filled), depth)
+    const label = `${paint(USED_CELL, colour, depth)} ${categoryLabel(b, item.category).padEnd(22, ' ')}`
+    const isLarge = item.tokens > LARGE_ITEM_TOKENS
+    const marker = isLarge ? ` ${paint('⚠', BRAND.yellow, depth)}` : ''
+    if (isLarge) {
       hasLarge = true
     }
     lines.push(
-      `${rank}  ${tokens}  ${label}  ${item.child}  ${item.preview}${marker}`,
+      `${rank}  ${tokens}  ${bar}  ${label}  ${item.child.padEnd(childWidth)}  ${dim(item.preview, depth)}${marker}`,
     )
   }
 
   if (hasLarge) {
     lines.push('')
     lines.push(
-      '⚠ Items over 5,000 tokens are unusually large and may dominate the context window.',
+      paint(
+        '⚠ Items over 5,000 tokens are unusually large and may dominate the context window.',
+        BRAND.yellow,
+        depth,
+      ),
     )
   }
 
   return lines.join('\n')
 }
 
-function formatDelta(delta: number): string {
+function formatDelta(delta: number, depth: number): string {
   const sign = delta >= 0 ? '+' : '-'
-  return `${sign}${formatTokens(Math.abs(delta))}`
+  const text = `${sign}${formatTokens(Math.abs(delta))}`
+  return paint(text.padStart(8), delta >= 0 ? BRAND.yellow : BRAND.green, depth)
 }
 
-function turnBar(inputTokens: number, max: number): string {
-  if (max <= 0) {
-    return '░'.repeat(40)
-  }
-  const filled = Math.min(40, Math.max(0, Math.round((40 * inputTokens) / max)))
-  return `${'█'.repeat(filled)}${'░'.repeat(40 - filled)}`
+const TURN_BAR_WIDTH = 40
+const SPARK = '▁▂▃▄▅▆▇█'
+
+function fillColour(ratio: number): string {
+  return ratio < 0.5 ? BRAND.green : ratio < 0.8 ? BRAND.yellow : BRAND.red
 }
 
-export function renderTurns(b: Breakdown): string {
-  const lines: string[] = [`Window max: ${formatTokens(b.window.max)}`]
+function turnBar(inputTokens: number, max: number, depth: number): string {
+  const filled =
+    max > 0
+      ? Math.min(
+          TURN_BAR_WIDTH,
+          Math.max(0, Math.round((TURN_BAR_WIDTH * inputTokens) / max)),
+        )
+      : 0
+  const ratio = max > 0 ? inputTokens / max : 0
+  return (
+    paint('█'.repeat(filled), fillColour(ratio), depth) +
+    paint('░'.repeat(TURN_BAR_WIDTH - filled), BRAND.dim, depth)
+  )
+}
+
+function turnSparkline(b: Breakdown, depth: number): string {
+  const peak = Math.max(1, ...b.turns.map((turn) => turn.inputTokens))
+  return b.turns
+    .map((turn) => {
+      const glyph =
+        SPARK[
+          Math.min(
+            SPARK.length - 1,
+            Math.floor((turn.inputTokens / peak) * SPARK.length),
+          )
+        ]
+      const colour = turn.compacted
+        ? BRAND.purple
+        : fillColour(b.window.max > 0 ? turn.inputTokens / b.window.max : 0)
+      return paint(glyph, colour, depth)
+    })
+    .join('')
+}
+
+export function renderTurns(b: Breakdown, depth = 1): string {
+  const lines: string[] = [
+    `${bold('Window max:', depth)} ${formatTokens(b.window.max)}   ${turnSparkline(b, depth)}`,
+  ]
   for (let index = 0; index < b.turns.length; index++) {
     const turn = b.turns[index]
-    const compactedSuffix = turn.compacted ? '  compacted' : ''
+    const compactedSuffix = turn.compacted
+      ? `  ${paint('compacted', BRAND.purple, depth)}`
+      : ''
     lines.push(
-      `  ${index + 1}  ${formatTokens(turn.inputTokens)}  ${formatDelta(turn.delta)}  ${turnBar(turn.inputTokens, b.window.max)}${compactedSuffix}`,
+      `  ${dim(String(index + 1).padStart(3), depth)}  ${formatTokens(turn.inputTokens).padStart(7)}  ${formatDelta(turn.delta, depth)}  ${turnBar(turn.inputTokens, b.window.max, depth)}${compactedSuffix}`,
     )
   }
   return lines.join('\n')
@@ -90,18 +229,10 @@ export function renderList(
       'Codex deletes old rollouts over time; only sessions still on disk can be listed.\n'
     )
   }
-  const home = homedir()
-  const homePrefix = home.endsWith('/') ? home : `${home}/`
   const rows = sessions.map((session) => {
-    let cwd = session.cwd
-    if (cwd.startsWith(homePrefix)) {
-      cwd = `~/${cwd.slice(homePrefix.length)}`
-    } else if (cwd === home) {
-      cwd = '~'
-    }
     const idShort = session.id.slice(0, 8)
     const window = formatTokens(session.windowMax)
-    return `${session.started}  ${idShort}  ${window}  ${cwd}  ${session.firstPrompt}`
+    return `${session.started}  ${idShort}  ${window}  ${breakdownDisplayCwd(session.cwd)}  ${session.firstPrompt}`
   })
   return `${rows.join('\n')}\n`
 }
@@ -110,131 +241,135 @@ export function formatTokens(n: number): string {
   return `${(n / 1000).toFixed(1)}k`
 }
 
-function breakdownFormat(b: Breakdown, color: boolean): string {
-  const lines: string[] = []
-  lines.push(breakdownHeaderLine(b))
-  lines.push(breakdownSummaryLine(b))
-  lines.push(breakdownBar(b, color))
-  lines.push('')
+const BREAKDOWN_GRID_COLUMNS = 20
+const BREAKDOWN_GRID_ROWS = 10
 
-  const labelWidth = 28
-  for (const cat of b.categories) {
-    lines.push(
-      breakdownCategoryRow(
-        cat.label,
-        cat.tokens,
-        breakdownPercentOfUsed(cat.tokens, b.window.used),
-        breakdownChildrenLine(cat.children),
-        labelWidth,
-      ),
+type BreakdownSegment = { key: CategoryKey | 'unattributed'; tokens: number }
+
+function breakdownSegments(b: Breakdown): BreakdownSegment[] {
+  return [
+    ...b.categories.map((cat) => ({ key: cat.key, tokens: cat.tokens })),
+    { key: 'unattributed' as const, tokens: b.unattributed },
+  ]
+}
+
+function breakdownGrid(b: Breakdown, depth: number): string[] {
+  const cellCount = BREAKDOWN_GRID_COLUMNS * BREAKDOWN_GRID_ROWS
+  const segments = breakdownSegments(b)
+  const counts = breakdownCellCounts(
+    segments.map((s) => s.tokens),
+    b.window.max,
+    cellCount,
+  )
+  const cells: string[] = []
+  segments.forEach((segment, i) => {
+    for (let k = 0; k < counts[i]; k++) {
+      cells.push(paint(USED_CELL, CATEGORY_COLOUR[segment.key], depth))
+    }
+  })
+  while (cells.length < cellCount) {
+    cells.push(paint(FREE_CELL, CATEGORY_COLOUR.free, depth))
+  }
+  const rows: string[] = []
+  for (let r = 0; r < BREAKDOWN_GRID_ROWS; r++) {
+    rows.push(
+      cells
+        .slice(r * BREAKDOWN_GRID_COLUMNS, (r + 1) * BREAKDOWN_GRID_COLUMNS)
+        .join(' '),
     )
   }
-
-  lines.push(
-    breakdownCategoryRow(
-      'Unattributed',
-      b.unattributed,
-      breakdownPercentOfUsed(b.unattributed, b.window.used),
-      'tool schemas, MCP, framing (not in rollout)',
-      labelWidth,
-    ),
-  )
-
-  const freeLabel = 'Free'.padEnd(labelWidth)
-  lines.push(`  ${freeLabel}${formatTokens(b.window.free).padStart(7)}`)
-
-  return lines.join('\n')
+  return rows
 }
 
-function breakdownHeaderLine(b: Breakdown): string {
-  const idPrefix = b.session.id.slice(0, 8)
-  const cwd = breakdownDisplayCwd(b.session.cwd)
-  const when = breakdownFormatStarted(b.session.started)
-  return `Codex context · ${idPrefix} · ${b.session.model} · ${cwd} · ${when}`
-}
-
-function breakdownSummaryLine(b: Breakdown): string {
-  const used = formatTokens(b.window.used)
-  const max = formatTokens(b.window.max)
-  const pct =
-    b.window.max > 0 ? ((b.window.used / b.window.max) * 100).toFixed(1) : '0.0'
-  return `${used} / ${max} tokens (${pct}%)`
-}
-
-const BREAKDOWN_BAR_WIDTH = 64
-
-const BREAKDOWN_BAR_SEGMENTS: {
-  glyph: string
-  style: Parameters<typeof styleText>[0]
-}[] = [
-  { glyph: '█', style: 'blue' },
-  { glyph: '▓', style: 'magenta' },
-  { glyph: '▒', style: 'cyan' },
-  { glyph: '░', style: 'green' },
-  { glyph: '▄', style: 'yellow' },
-  { glyph: '▀', style: 'red' },
-  { glyph: '▐', style: 'white' },
-  { glyph: '▌', style: 'gray' },
-  { glyph: '▎', style: 'whiteBright' },
-]
-
-function breakdownBar(b: Breakdown, color: boolean): string {
-  const tokensBySegment = [
-    ...b.categories.map((cat) => cat.tokens),
-    b.unattributed,
-    b.window.free,
-  ]
-  const counts = breakdownDistributeBarChars(tokensBySegment, b.window.max)
-  let bar = ''
-  let width = 0
-  for (let i = 0; i < counts.length; i++) {
-    const count = counts[i]
-    if (count <= 0) {
-      continue
-    }
-    const isFree = i === counts.length - 1
-    const glyph = isFree ? '·' : (BREAKDOWN_BAR_SEGMENTS[i]?.glyph ?? '·')
-    const style = isFree ? 'gray' : (BREAKDOWN_BAR_SEGMENTS[i]?.style ?? 'gray')
-    const chunk = glyph.repeat(count)
-    bar += color ? styleText(style, chunk) : chunk
-    width += count
-  }
-  if (width < BREAKDOWN_BAR_WIDTH) {
-    const pad = '·'.repeat(BREAKDOWN_BAR_WIDTH - width)
-    bar += color ? styleText('gray', pad) : pad
-  }
-  return bar
-}
-
-function breakdownDistributeBarChars(tokens: number[], max: number): number[] {
+function breakdownCellCounts(
+  tokens: number[],
+  max: number,
+  cells: number,
+): number[] {
   if (max <= 0) {
     return tokens.map(() => 0)
   }
-  const exact = tokens.map((t) => (t / max) * BREAKDOWN_BAR_WIDTH)
-  const floors = exact.map((v) => Math.floor(v))
-  let remaining = BREAKDOWN_BAR_WIDTH - floors.reduce((a, b) => a + b, 0)
+  const exact = tokens.map((t) => (t / max) * cells)
+  const result = exact.map((v, i) =>
+    tokens[i] > 0 ? Math.max(1, Math.floor(v)) : 0,
+  )
+  const target = Math.min(
+    cells,
+    Math.max(
+      result.reduce((a, c) => a + c, 0),
+      Math.round(exact.reduce((a, c) => a + c, 0)),
+    ),
+  )
   const order = exact
     .map((v, i) => ({ i, frac: v - Math.floor(v) }))
-    .sort((a, b) => b.frac - a.frac)
-  const result = [...floors]
-  for (let k = 0; k < remaining && k < order.length; k++) {
+    .filter(({ i }) => tokens[i] > 0)
+    .sort((a, c) => c.frac - a.frac)
+  let total = result.reduce((a, c) => a + c, 0)
+  for (let k = 0; total < target && k < order.length; k++, total++) {
     result[order[k].i] += 1
+  }
+  while (total > cells) {
+    const largest = result.indexOf(Math.max(...result))
+    result[largest] -= 1
+    total -= 1
   }
   return result
 }
 
-function breakdownCategoryRow(
+const LEGEND_LABEL_WIDTH = 24
+
+function breakdownLegend(b: Breakdown, depth: number): string[] {
+  const idPrefix = b.session.id.slice(0, 8)
+  const pct =
+    b.window.max > 0 ? ((b.window.used / b.window.max) * 100).toFixed(1) : '0.0'
+  const lines = [
+    `${bold('Codex context', depth)} · ${idPrefix}`,
+    `${paint(b.session.model, BRAND.green, depth)} · ${breakdownDisplayCwd(b.session.cwd)} · ${breakdownFormatStarted(b.session.started)}`,
+    `${paint(`${formatTokens(b.window.used)} / ${formatTokens(b.window.max)} tokens (${pct}%)`, BRAND.cta, depth, true)}`,
+    '',
+    dim('Usage by category (% of used)', depth),
+  ]
+  for (const cat of b.categories) {
+    lines.push(
+      breakdownLegendRow(
+        paint(USED_CELL, CATEGORY_COLOUR[cat.key], depth),
+        cat.label,
+        cat.tokens,
+        breakdownPercentOfUsed(cat.tokens, b.window.used),
+        dim(breakdownChildrenLine(cat.children), depth),
+      ),
+    )
+  }
+  lines.push(
+    breakdownLegendRow(
+      paint(USED_CELL, CATEGORY_COLOUR.unattributed, depth),
+      'Unattributed',
+      b.unattributed,
+      breakdownPercentOfUsed(b.unattributed, b.window.used),
+      dim('tool schemas, MCP, framing (not in rollout)', depth),
+    ),
+  )
+  lines.push(
+    breakdownLegendRow(
+      paint(FREE_CELL, CATEGORY_COLOUR.free, depth),
+      'Free',
+      b.window.free,
+      '',
+      '',
+    ),
+  )
+  return lines
+}
+
+function breakdownLegendRow(
+  icon: string,
   label: string,
   tokens: number,
   percent: string,
   children: string,
-  labelWidth: number,
 ): string {
-  const labelCol = label.padEnd(labelWidth)
-  const tokCol = formatTokens(tokens).padStart(7)
-  const pctCol = percent.padStart(8)
-  const suffix = children ? `   ${children}` : ''
-  return `  ${labelCol}${tokCol}${pctCol}${suffix}`
+  const row = `${icon} ${label.padEnd(LEGEND_LABEL_WIDTH)}${formatTokens(tokens).padStart(7)}${percent.padStart(8)}`
+  return children ? `${row}   ${children}` : row
 }
 
 function breakdownPercentOfUsed(tokens: number, used: number): string {
@@ -247,11 +382,10 @@ function breakdownPercentOfUsed(tokens: number, used: number): string {
 function breakdownChildrenLine(
   children: { name: string; tokens: number }[],
 ): string {
-  const top = children.slice(0, 3)
-  if (top.length === 0) {
-    return ''
-  }
-  return top.map((c) => `${c.name} ${formatTokens(c.tokens)}`).join(' · ')
+  return children
+    .slice(0, 3)
+    .map((c) => `${c.name} ${formatTokens(c.tokens)}`)
+    .join(' · ')
 }
 
 function breakdownDisplayCwd(cwd: string): string {
@@ -266,31 +400,27 @@ function breakdownDisplayCwd(cwd: string): string {
   return cwd
 }
 
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+]
+
 function breakdownFormatStarted(iso: string): string {
-  if (!iso) {
-    return ''
-  }
   const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) {
+  if (!iso || Number.isNaN(date.getTime())) {
     return ''
   }
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ]
-  const day = date.getDate()
-  const month = months[date.getMonth()]
   const hours = String(date.getHours()).padStart(2, '0')
   const minutes = String(date.getMinutes()).padStart(2, '0')
-  return `${day} ${month} ${hours}:${minutes}`
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${hours}:${minutes}`
 }

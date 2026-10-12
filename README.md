@@ -3,8 +3,8 @@
 ```text
       ___
      /   \
-    | o o |   CODEX AUTOPSY
-     \___/
+    | x x |   CODEX AUTOPSY
+     \_^_/    ● ● ● ● ●
  What killed my context window?
 ```
 
@@ -20,6 +20,22 @@ npx codex-autopsy --top 10        # the 10 biggest items in the window
 npx codex-autopsy --turns         # how the window filled up, turn by turn
 npx codex-autopsy --json          # the same breakdown as JSON, for scripts
 ```
+
+![codex-autopsy showing a 20 by 10 grid of coloured cells, one colour per category, next to a legend with tokens and percentages](docs/breakdown.png)
+
+`--top` ranks the biggest single items, so you can see which command or file read filled the window:
+
+![codex-autopsy --top 6 listing the largest tool outputs with size bars](docs/top.png)
+
+`--turns` shows how the window filled up, turn by turn:
+
+![codex-autopsy --turns showing a sparkline and one bar per turn, green under half full and yellow above](docs/turns.png)
+
+The screenshots use a synthetic demo session.
+
+## Colour
+
+Each category has its own colour from the Agoda brand palette. Terminals with 24-bit colour get the exact brand colours; other terminals get the nearest 256-colour or 16-colour match. Colour is off when output is piped, with `--json`, or when `NO_COLOR` is set. Set `FORCE_COLOR=3` to force 24-bit colour, for example when piping into `less -R`.
 
 ## What each category means
 
