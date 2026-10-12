@@ -22,8 +22,29 @@ export function renderTop(_b: Breakdown, _n: number): string {
   return ''
 }
 
-export function renderTurns(_b: Breakdown): string {
-  return ''
+function formatDelta(delta: number): string {
+  const sign = delta >= 0 ? '+' : '-'
+  return `${sign}${formatTokens(Math.abs(delta))}`
+}
+
+function turnBar(inputTokens: number, max: number): string {
+  if (max <= 0) {
+    return '░'.repeat(40)
+  }
+  const filled = Math.min(40, Math.max(0, Math.round((40 * inputTokens) / max)))
+  return `${'█'.repeat(filled)}${'░'.repeat(40 - filled)}`
+}
+
+export function renderTurns(b: Breakdown): string {
+  const lines: string[] = [`Window max: ${formatTokens(b.window.max)}`]
+  for (let index = 0; index < b.turns.length; index++) {
+    const turn = b.turns[index]
+    const compactedSuffix = turn.compacted ? '  compacted' : ''
+    lines.push(
+      `  ${index + 1}  ${formatTokens(turn.inputTokens)}  ${formatDelta(turn.delta)}  ${turnBar(turn.inputTokens, b.window.max)}${compactedSuffix}`,
+    )
+  }
+  return lines.join('\n')
 }
 
 export function renderList(sessions: SessionSummary[]): string {

@@ -444,8 +444,101 @@ export function readItems(records: RolloutRecord[]): Item[] {
   return items
 }
 
-export function collectTurns(_records: RolloutRecord[]): Turn[] {
-  return []
+function inputTokensFromTokenCount(record: RolloutRecord): number | undefined {
+  if (record.type !== 'event_msg' || record.payload.type !== 'token_count') {
+    return undefined
+  }
+  const info = record.payload.info
+  if (!info || typeof info !== 'object') {
+    return undefined
+  }
+  const usage = (info as Record<string, unknown>).last_token_usage
+  if (!usage || typeof usage !== 'object') {
+    return undefined
+  }
+  const input = (usage as Record<string, unknown>).input_tokens
+  return typeof input === 'number' ? input : undefined
+}
+
+export function collectTurns(records: RolloutRecord[]): Turn[] {
+  const turns: Turn[] = []
+  let turnContextCount = 0
+  let currentTurnId = ''
+  let lastInputInTurn: number | undefined
+  let sawTokenCountInTurn = false
+  let compactedInTurn = false
+  let deferCompactionToNextKeptTurn = false
+  let deferCompactionSetInCurrentTurn = false
+  let previousKeptInput: number | undefined
+
+  const flushTurn = () => {
+    if (turnContextCount === 0) {
+      return
+    }
+    if (lastInputInTurn === undefined) {
+      compactedInTurn = false
+      sawTokenCountInTurn = false
+      return
+    }
+    const inputTokens = lastInputInTurn
+    const delta =
+      previousKeptInput === undefined
+        ? inputTokens
+        : inputTokens - previousKeptInput
+    const compactedAfterPreviousTurn =
+      deferCompactionToNextKeptTurn && !deferCompactionSetInCurrentTurn
+    turns.push({
+      turnId: currentTurnId,
+      inputTokens,
+      delta,
+      compacted: compactedInTurn || compactedAfterPreviousTurn,
+    })
+    previousKeptInput = inputTokens
+    if (deferCompactionSetInCurrentTurn) {
+      deferCompactionSetInCurrentTurn = false
+    } else {
+      deferCompactionToNextKeptTurn = false
+    }
+    compactedInTurn = false
+    sawTokenCountInTurn = false
+  }
+
+  for (const record of records) {
+    if (record.type === 'turn_context') {
+      flushTurn()
+      turnContextCount += 1
+      const turnId = record.payload.turn_id
+      currentTurnId =
+        typeof turnId === 'string' ? turnId : String(turnContextCount)
+      lastInputInTurn = undefined
+      sawTokenCountInTurn = false
+      compactedInTurn = false
+      continue
+    }
+
+    if (record.type === 'compacted') {
+      if (sawTokenCountInTurn) {
+        deferCompactionToNextKeptTurn = true
+        deferCompactionSetInCurrentTurn = true
+      } else {
+        compactedInTurn = true
+      }
+      continue
+    }
+
+    if (turnContextCount === 0) {
+      continue
+    }
+
+    const input = inputTokensFromTokenCount(record)
+    if (input !== undefined) {
+      lastInputInTurn = input
+      sawTokenCountInTurn = true
+    }
+  }
+
+  flushTurn()
+  return turns
 }
 
 export function afterLastCompaction(records: RolloutRecord[]): RolloutRecord[] {
