@@ -46,4 +46,4 @@ codex-autopsy reads only local files and sends nothing anywhere.
 
 ## License
 
-MIT
+Apache-2.0. See [LICENSE](LICENSE).

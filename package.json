@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "description": "What killed my context window? A per-category breakdown of a Codex session's context.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "bin": {
     "codex-autopsy": "./dist/cli.js"
   },
