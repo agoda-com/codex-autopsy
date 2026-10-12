@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { styleText } from 'node:util'
 
 import type { Breakdown, CategoryKey } from './breakdown.js'
@@ -79,10 +80,13 @@ export function renderTurns(b: Breakdown): string {
   return lines.join('\n')
 }
 
-export function renderList(sessions: SessionSummary[]): string {
+export function renderList(
+  sessions: SessionSummary[],
+  codexHomeDir: string,
+): string {
   if (sessions.length === 0) {
     return (
-      'No rollouts found under CODEX_HOME/sessions. ' +
+      `No rollouts found under ${join(codexHomeDir, 'sessions')}. ` +
       'Codex deletes old rollouts over time; only sessions still on disk can be listed.\n'
     )
   }

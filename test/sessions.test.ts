@@ -107,7 +107,7 @@ describe('missingRolloutsAreReported', () => {
     const code = main(['--list'], { CODEX_HOME: home }, io)
     expect(code).toBe(0)
     const text = stdout.join('')
-    expect(text).toMatch(/sessions/i)
+    expect(text).toContain(join(home, 'sessions'))
     expect(text).toMatch(/no rollout/i)
     expect(text).toMatch(/codex deletes/i)
   })

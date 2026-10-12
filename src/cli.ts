@@ -65,7 +65,7 @@ export function main(
   const home = codexHome(env)
 
   if (parsed.values.list) {
-    const text = renderList(listSessions(home))
+    const text = renderList(listSessions(home), home)
     io.stdout.write(text)
     if (text.length > 0 && !text.endsWith('\n')) {
       io.stdout.write('\n')
