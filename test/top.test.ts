@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { buildBreakdown, countTokens, previewOf } from '../src/breakdown.js'
 import { readRollout } from '../src/rollout.js'
-import { renderTop } from '../src/render.js'
+import { formatTokens, renderTop } from '../src/render.js'
 import {
   customToolCall,
   customToolCallOutput,
@@ -15,35 +15,6 @@ import {
   turnContext,
   writeRollout,
 } from './fixtures/build.js'
-
-function tokenText(targetTokens: number): string {
-  if (targetTokens <= 120) {
-    return filler(targetTokens)
-  }
-  let length = targetTokens * 2
-  let text = 'x'.repeat(length)
-  while (countTokens(text) < targetTokens) {
-    length *= 2
-    text = 'x'.repeat(length)
-  }
-  let lo = 1
-  let hi = text.length
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2)
-    if (countTokens(text.slice(0, mid)) < targetTokens) {
-      lo = mid
-    } else {
-      hi = mid - 1
-    }
-  }
-  while (lo < text.length && countTokens(text.slice(0, lo)) < targetTokens) {
-    lo += 1
-  }
-  while (lo > 0 && countTokens(text.slice(0, lo)) > targetTokens) {
-    lo -= 1
-  }
-  return text.slice(0, lo)
-}
 
 describe('topRanksToolOutputsBySize', () => {
   it('lists the largest items in descending token order', () => {
@@ -113,8 +84,8 @@ describe('execPreviewShowsCommand', () => {
 describe('longOutputIsFlagged', () => {
   it('marks outputs over 5k tokens and not smaller ones', () => {
     const home = mkdtempSync(join(tmpdir(), 'codex-autopsy-'))
-    const huge = tokenText(6000)
-    const small = tokenText(1000)
+    const huge = filler(6000)
+    const small = filler(1000)
     expect(countTokens(huge)).toBe(6000)
     expect(countTokens(small)).toBe(1000)
     const path = writeRollout(home, '2026-01-15', 'large-flag', [
@@ -146,9 +117,5 @@ describe('longOutputIsFlagged', () => {
     expect(hugeLine).toBeDefined()
     expect(smallLine).toBeDefined()
     expect(text).toMatch(/5,?000/)
-  }, 60_000)
+  })
 })
-
-function formatTokens(n: number): string {
-  return `${(n / 1000).toFixed(1)}k`
-}

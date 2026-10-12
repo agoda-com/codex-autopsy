@@ -163,17 +163,11 @@ export function malformedLine(): string {
 }
 
 export function filler(targetTokens: number): string {
-  if (targetTokens <= 0) {
-    return ''
-  }
-  let text = 'x'
-  while (countTokens(text) < targetTokens) {
-    text += 'x'
-  }
-  while (countTokens(text) > targetTokens) {
-    text = text.slice(0, -1)
-  }
-  return text
+  const words = ['sit', 'amet', 'lorem', 'ipsum', 'dolor']
+  return Array.from(
+    { length: Math.max(0, targetTokens) },
+    (_, i) => words[i % words.length],
+  ).join(' ')
 }
 
 export function writeRollout(
